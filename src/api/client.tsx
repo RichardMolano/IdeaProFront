@@ -1,4 +1,6 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://dental-helena-your-horizon.trycloudflare.com";
 
 // Define or import the User type
 type User = {
@@ -51,6 +53,8 @@ export const PqrAPI = {
 };
 
 export const ChatAPI = {
+  // Retorna los grupos de chat con información extendida de PQR y solver asignado
+  groupsWithDetails: () => api("/chat/groups-with-details"),
   groups: () => api("/chat/groups"),
   messages: (groupId: string) =>
     api(`/chat/messages?groupId=${encodeURIComponent(groupId)}`),
@@ -63,6 +67,14 @@ export const ChatAPI = {
     api("/chat/message", {
       method: "POST",
       body: JSON.stringify({ chat_group_id, content, file_url, file_type }),
+    }),
+  setGroupStatus: (
+    chat_group_id: string,
+    status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED"
+  ) =>
+    api("/chat/set-group-status", {
+      method: "POST",
+      body: JSON.stringify({ chat_group_id, status }),
     }),
 };
 

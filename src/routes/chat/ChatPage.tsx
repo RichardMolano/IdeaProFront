@@ -1,6 +1,7 @@
 import { ChatAPI, UserAPI } from "../../api/client";
 import { useEffect, useRef, useState } from "react";
 import { Button, Input } from "../../ui/Form";
+import { log } from "console";
 
 type Group = { id: string; status: string; priority: string };
 type Message = {
@@ -16,11 +17,48 @@ const PRIORITY_STYLES: Record<string, string> = {
   LOW: "bg-emerald-100 text-emerald-800",
 };
 
+const STATUS_TRANSLATIONS: Record<
+  string,
+  { text: string; tooltip: string; cls: string }
+> = {
+  OPEN: {
+    text: "Abierta",
+    tooltip: "Chat abierto",
+    cls: "bg-emerald-100 text-emerald-800",
+  },
+  IN_PROGRESS: {
+    text: "En progreso",
+    tooltip: "Chat en progreso",
+    cls: "bg-amber-100 text-amber-800",
+  },
+  RESOLVED: {
+    text: "Resuelta",
+    tooltip: "Chat resuelto",
+    cls: "bg-blue-100 text-blue-800",
+  },
+  CLOSED: {
+    text: "Cerrada",
+    tooltip: "Chat cerrado",
+    cls: "bg-rose-100 text-rose-800",
+  },
+};
+
+function getStatusText(status?: string) {
+  const s = (status || "").toUpperCase();
+  return STATUS_TRANSLATIONS[s]?.text || s;
+}
+
+function getStatusTooltip(status?: string) {
+  const s = (status || "").toUpperCase();
+  return STATUS_TRANSLATIONS[s]?.tooltip || s;
+}
+
 function statusBadge(status?: string) {
   const s = (status || "").toUpperCase();
-  return s === "CLOSED"
-    ? { dot: "🔴", text: "Cerrado", cls: "bg-rose-100 text-rose-800" }
-    : { dot: "🟢", text: "Abierto", cls: "bg-emerald-100 text-emerald-800" };
+  const info = STATUS_TRANSLATIONS[s];
+  return info
+    ? { dot: "", text: info.text, cls: info.cls }
+    : { dot: "", text: s, cls: "bg-gray-100 text-gray-800" };
 }
 
 export default function ChatPage() {
@@ -86,6 +124,7 @@ export default function ChatPage() {
   }, [msgs.length]);
 
   const isClosed = (active?.status || "").toUpperCase() === "CLOSED";
+  const isAdminOrSolver = me?.role === "Admin" || me?.role === "Solver";
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -100,17 +139,14 @@ export default function ChatPage() {
     }
   }
 
-  async function toggleStatus() {
-    if (!active || !canToggle) return;
-    const next = isClosed ? "OPEN" : "CLOSED";
+  async function setStatus(newStatus: string) {
+    if (!active || !isAdminOrSolver) return;
     try {
-      // si tienes este método en ChatAPI, se usará; si no, no rompe el resto
       // @ts-ignore
-      await ChatAPI.setGroupStatus?.(active.id, next);
-      // actualiza UI local (el polling seguirá igual)
-      setActive({ ...active, status: next });
+      await ChatAPI.setGroupStatus?.(active.id, newStatus);
+      setActive({ ...active, status: newStatus });
       setGroups((gs) =>
-        gs.map((g) => (g.id === active.id ? { ...g, status: next } : g))
+        gs.map((g) => (g.id === active.id ? { ...g, status: newStatus } : g))
       );
     } catch {
       alert("No se pudo cambiar el estado del chat.");
@@ -143,8 +179,9 @@ export default function ChatPage() {
                   <div className="text-xs opacity-70">#{g.id.slice(0, 8)}…</div>
                   <span
                     className={`text-[10px] px-2 py-0.5 rounded-full ${s.cls}`}
+                    title={getStatusTooltip(g.status)}
                   >
-                    {s.dot} {s.text}
+                    {s.text}
                   </span>
                   <span
                     className={`text-[10px] px-2 py-0.5 rounded-full ${pCls}`}
@@ -165,29 +202,35 @@ export default function ChatPage() {
           )}
         </div>
       </div>
-
       {/* Chat */}
       <div className="md:col-span-2 border rounded p-3 flex flex-col h-[70vh]">
         <div className="flex items-center justify-between mb-2">
           <div className="font-semibold">
             Chat {active ? `#${active.id.slice(0, 8)}…` : ""}
           </div>
-          {active && canToggle && (
-            <Button
-              type="button"
-              onClick={toggleStatus}
-              className={
-                isClosed
-                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                  : "bg-rose-600 text-white hover:bg-rose-700"
-              }
-              title={isClosed ? "Abrir chat" : "Cerrar chat"}
-            >
-              {isClosed ? "🔓 Abrir" : "🔒 Cerrar"}
-            </Button>
+          {active && isAdminOrSolver && (
+            <div className="flex gap-2">
+              {["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"].map((status) => (
+                <Button
+                  key={status}
+                  type="button"
+                  onClick={() => setStatus(status)}
+                  className={
+                    (active.status?.toUpperCase() === status
+                      ? STATUS_TRANSLATIONS[status].cls +
+                        " border-2 border-black "
+                      : "bg-gray-200 text-gray-500 border border-gray-300 ") +
+                    " text-sm px-3 py-1 rounded"
+                  }
+                  title={STATUS_TRANSLATIONS[status].tooltip}
+                  disabled={active.status?.toUpperCase() === status}
+                >
+                  {STATUS_TRANSLATIONS[status].text}
+                </Button>
+              ))}
+            </div>
           )}
         </div>
-
         <div className="flex-1 overflow-y-auto space-y-2">
           {msgs.map((m) => (
             <div
