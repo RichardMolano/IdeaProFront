@@ -1,274 +1,538 @@
+import Box from "@mui/material/Box";
+import Typography from "@mui/material/Typography";
+import List from "@mui/material/List";
+import ListItem from "@mui/material/ListItem";
+import ListItemButton from "@mui/material/ListItemButton";
+import Avatar from "@mui/material/Avatar";
+import Chip from "@mui/material/Chip";
+import Divider from "@mui/material/Divider";
+import TextField from "@mui/material/TextField";
+import IconButton from "@mui/material/IconButton";
+import Paper from "@mui/material/Paper";
+import SendRounded from "@mui/icons-material/SendRounded";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
+import Skeleton from "@mui/material/Skeleton";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatAPI, UserAPI } from "../../api/client";
-import { useEffect, useRef, useState } from "react";
-import { Button, Input } from "../../ui/Form";
-import { log } from "console";
 
-type Group = { id: string; status: string; priority: string };
-type Message = {
-  id: string;
-  content: string;
-  sender_user: { email: string };
-  created_at: string;
-};
-
-const PRIORITY_STYLES: Record<string, string> = {
-  HIGH: "bg-red-100 text-red-800",
-  MEDIUM: "bg-amber-100 text-amber-800",
-  LOW: "bg-emerald-100 text-emerald-800",
-};
-
-const STATUS_TRANSLATIONS: Record<
-  string,
-  { text: string; tooltip: string; cls: string }
-> = {
-  OPEN: {
-    text: "Abierta",
-    tooltip: "Chat abierto",
-    cls: "bg-emerald-100 text-emerald-800",
-  },
-  IN_PROGRESS: {
-    text: "En progreso",
-    tooltip: "Chat en progreso",
-    cls: "bg-amber-100 text-amber-800",
-  },
-  RESOLVED: {
-    text: "Resuelta",
-    tooltip: "Chat resuelto",
-    cls: "bg-blue-100 text-blue-800",
-  },
-  CLOSED: {
-    text: "Cerrada",
-    tooltip: "Chat cerrado",
-    cls: "bg-rose-100 text-rose-800",
-  },
-};
-
-function getStatusText(status?: string) {
-  const s = (status || "").toUpperCase();
-  return STATUS_TRANSLATIONS[s]?.text || s;
-}
-
-function getStatusTooltip(status?: string) {
-  const s = (status || "").toUpperCase();
-  return STATUS_TRANSLATIONS[s]?.tooltip || s;
-}
-
-function statusBadge(status?: string) {
-  const s = (status || "").toUpperCase();
-  const info = STATUS_TRANSLATIONS[s];
-  return info
-    ? { dot: "", text: info.text, cls: info.cls }
-    : { dot: "", text: s, cls: "bg-gray-100 text-gray-800" };
-}
+const STATUSES = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
+const LAYOUT_H = "72vh"; // altura fija para permitir scroll interno
 
 export default function ChatPage() {
   const me = UserAPI.getUserInfoFromToken();
-  const canToggle = me?.role === "Admin" || me?.role === "Solver";
+  const isAdminOrSolver = me?.role === "Admin" || me?.role === "Solver";
+  const isSmall = useMediaQuery("(max-width:900px)");
 
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [active, setActive] = useState<Group | null>(null);
-  const [msgs, setMsgs] = useState<Message[]>([]);
+  const [groups, setGroups] = useState<any[]>([]);
+  const [active, setActive] = useState<any | null>(null);
+  const [msgs, setMsgs] = useState<any[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const sseRef = useRef<EventSource | null>(null);
 
-  // 🔒 guard contra respuestas tardías
-  const activeIdRef = useRef<string | null>(null);
+  const isClosed = (active?.status || "").toUpperCase() === "CLOSED";
+  const canWrite = !!active && !isClosed;
 
-  // Carga de grupos (como tenías)
+  const statusChipColor = (s?: string) => {
+    switch ((s || "").toUpperCase()) {
+      case "OPEN":
+        return "success";
+      case "IN_PROGRESS":
+        return "warning";
+      case "RESOLVED":
+        return "info";
+      case "CLOSED":
+        return "error";
+      default:
+        return "default";
+    }
+  };
+  const priorityChipColor = (p?: string) => {
+    switch ((p || "").toUpperCase()) {
+      case "HIGH":
+        return "error";
+      case "MEDIUM":
+        return "warning";
+      case "LOW":
+        return "success";
+      default:
+        return "default";
+    }
+  };
+
+  // colores para estilizar Select según estado (borde/label)
+  const statusAccent = (s?: string) => {
+    const v = (s || "").toUpperCase();
+    if (v === "OPEN") return "#2e7d32";
+    if (v === "IN_PROGRESS") return "#f9a825";
+    if (v === "RESOLVED") return "#1565c0";
+    if (v === "CLOSED") return "#c62828";
+    return undefined;
+  };
+
+  // Carga de grupos via SSE con fallback a polling
   useEffect(() => {
-    ChatAPI.groups().then(setGroups);
-  }, []);
+    let cancelled = false;
 
-  // Polling (misma idea, pero blindado contra “cambios de chat”)
+    const applyGroups = (data: any[]) => {
+      if (cancelled) return;
+      setGroups(data);
+      if (active && !data.find((g: any) => g.id === active.id)) setActive(null);
+    };
+
+    // Fallback polling
+    const startPolling = () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      const fetchGroups = async () => {
+        try {
+          const data =
+            (await (ChatAPI as any).groupsWithDetails?.()) ||
+            (await ChatAPI.groups());
+          applyGroups(data || []);
+        } catch {
+          // noop
+        }
+      };
+      fetchGroups();
+      pollRef.current = window.setInterval(
+        fetchGroups,
+        5000
+      ) as unknown as number;
+    };
+
+    // SSE si existe EventSource
+    if (typeof window !== "undefined" && "EventSource" in window) {
+      try {
+        sseRef.current = new window.EventSource("/api/chat/groups/stream");
+        sseRef.current.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            applyGroups(data);
+          } catch {
+            // si payload inválido, ignorar
+          }
+        };
+        sseRef.current.onerror = () => {
+          // cae a polling
+          if (sseRef.current) {
+            sseRef.current.close();
+            sseRef.current = null;
+          }
+          startPolling();
+        };
+      } catch {
+        startPolling();
+      }
+    } else {
+      startPolling();
+    }
+
+    return () => {
+      cancelled = true;
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+      if (pollRef.current) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id]);
+
+  // Poll de mensajes del activo
   useEffect(() => {
-    // si no hay chat activo, limpia
     if (!active?.id) {
-      activeIdRef.current = null;
       setMsgs([]);
       return;
     }
-
-    activeIdRef.current = active.id;
-
-    let timer: number | undefined;
+    let timer: number | null = null;
     let cancelled = false;
 
     async function loadOnce(groupId: string) {
       try {
+        setLoadingMsgs(true);
         const data = await ChatAPI.messages(groupId);
-        // ⛔️ Ignora si ya cambiaste de chat o se canceló el efecto
-        if (cancelled) return;
-        if (activeIdRef.current !== groupId) return;
-        setMsgs(data);
+        if (!cancelled) setMsgs(data || []);
       } catch {
-        // no-op
+        /* noop */
+      } finally {
+        if (!cancelled) setLoadingMsgs(false);
       }
-      // reprograma solo si seguimos en el mismo chat
-      if (!cancelled && activeIdRef.current === groupId) {
-        timer = window.setTimeout(() => loadOnce(groupId), 1500);
-      }
+      if (!cancelled)
+        timer = window.setTimeout(
+          () => loadOnce(groupId),
+          1500
+        ) as unknown as number;
     }
 
     loadOnce(active.id);
-
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
+      if (timer) window.clearTimeout(timer);
     };
   }, [active?.id]);
 
-  // Autoscroll (igual)
+  // Autoscroll al último mensaje
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs.length]);
+  }, [msgs.length, loadingMsgs, active?.id]);
 
-  const isClosed = (active?.status || "").toUpperCase() === "CLOSED";
-  const isAdminOrSolver = me?.role === "Admin" || me?.role === "Solver";
-
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
-    if (!active || !text.trim() || isClosed) return;
+  async function send(e?: React.FormEvent) {
+    e?.preventDefault?.();
+    if (!canWrite || !text.trim()) return;
     setSending(true);
     try {
-      await ChatAPI.send(active.id, text.trim());
+      await ChatAPI.send(active!.id, text.trim());
       setText("");
-      // el polling traerá el mensaje nuevo; no tocamos la lógica
+      // El efecto de autoscroll se dispara al cambiar msgs
     } finally {
       setSending(false);
     }
   }
 
-  async function setStatus(newStatus: string) {
-    if (!active || !isAdminOrSolver) return;
-    try {
-      // @ts-ignore
-      await ChatAPI.setGroupStatus?.(active.id, newStatus);
-      setActive({ ...active, status: newStatus });
-      setGroups((gs) =>
-        gs.map((g) => (g.id === active.id ? { ...g, status: newStatus } : g))
-      );
-    } catch {
-      alert("No se pudo cambiar el estado del chat.");
-    }
-  }
+  const statusBorderSx = useMemo(() => {
+    const color = statusAccent(active?.status);
+    if (!color) return {};
+    return {
+      "& .MuiOutlinedInput-notchedOutline": { borderColor: `${color}55` },
+      "&:hover .MuiOutlinedInput-notchedOutline": { borderColor: `${color}88` },
+      "&.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: color },
+      "& .MuiInputLabel-root": { color: `${color}cc` },
+      "&.Mui-focused .MuiInputLabel-root": { color },
+    } as const;
+  }, [active?.status]);
 
   return (
-    <div className="grid md:grid-cols-3 gap-4">
-      {/* Lista de chats */}
-      <div className="border rounded p-2">
-        <div className="font-semibold mb-2">Mis Chats</div>
-        <div className="space-y-1">
+    <Box
+      sx={{
+        height: LAYOUT_H,
+        width: "min(100%, 1100px)",
+        mx: "auto",
+        my: "auto",
+        p: 2,
+        display: "grid",
+        gridTemplateColumns: isSmall ? "1fr" : "320px 1fr",
+        gridTemplateRows: isSmall ? "280px 1fr" : "1fr",
+        gap: 2,
+      }}
+    >
+      {/* Sidebar (scrollable) */}
+      <Paper
+        elevation={3}
+        sx={{
+          height: "100%",
+          overflow: "hidden",
+          borderRadius: 3,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <Box
+          sx={{
+            p: 2,
+            borderBottom: "1px solid",
+            borderColor: "divider",
+            bgcolor: "background.paper",
+          }}
+        >
+          <Typography variant="h6" fontWeight={800}>
+            Mis Chats
+          </Typography>
+        </Box>
+
+        <List
+          sx={{
+            flex: 1,
+            overflowY: "auto",
+            p: 1,
+            scrollBehavior: "smooth",
+          }}
+        >
+          {groups.length === 0 && (
+            <ListItem>
+              <Typography color="text.secondary">
+                No tienes chats aún.
+              </Typography>
+            </ListItem>
+          )}
           {groups.map((g) => {
-            const s = statusBadge(g.status);
-            const pCls =
-              PRIORITY_STYLES[(g.priority || "").toUpperCase()] ||
-              "bg-gray-100 text-gray-800";
+            const selected = active?.id === g.id;
             return (
-              <button
-                key={g.id}
-                onClick={() => setActive(g)}
-                className={
-                  "block w-full text-left px-2 py-2 rounded border " +
-                  (active?.id === g.id
-                    ? "bg-black text-white border-black"
-                    : "hover:bg-gray-50 border-gray-200")
-                }
-              >
-                <div className="flex items-center gap-2">
-                  <div className="text-xs opacity-70">#{g.id.slice(0, 8)}…</div>
-                  <span
-                    className={`text-[10px] px-2 py-0.5 rounded-full ${s.cls}`}
-                    title={getStatusTooltip(g.status)}
+              <ListItem disablePadding key={g.id} sx={{ mb: 0.5 }}>
+                <ListItemButton
+                  selected={selected}
+                  onClick={() => setActive(g)}
+                  sx={{
+                    borderRadius: 2,
+                    px: 1.5,
+                    py: 1,
+                    bgcolor: selected ? "#000" : "#fff",
+                    color: selected ? "#fff" : "#000",
+                    boxShadow: selected ? 2 : 0,
+                    "&:hover": {
+                      bgcolor: selected ? "#000" : "#f5f5f5",
+                    },
+                  }}
+                >
+                  <Avatar
+                    sx={{ mr: 1.5 }}
+                    src={g.pqr?.client_user?.avatar || undefined}
                   >
-                    {s.text}
-                  </span>
-                  <span
-                    className={`text-[10px] px-2 py-0.5 rounded-full ${pCls}`}
-                  >
-                    Prioridad:{" "}
-                    {g.priority
-                      ? g.priority[0] + g.priority.slice(1).toLowerCase()
-                      : "-"}
-                  </span>
-                </div>
-              </button>
+                    {g.pqr?.client_user?.email?.[0]?.toUpperCase() || "U"}
+                  </Avatar>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography noWrap fontWeight={700}>
+                      {g.pqr?.client_user?.email || "Usuario"}
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      noWrap
+                      color={selected ? "inherit" : "text.primary"}
+                    >
+                      {g.pqr?.title || `Chat #${g.id.slice(0, 8)}…`}
+                    </Typography>
+                    <Box
+                      sx={{
+                        mt: 0.75,
+                        display: "flex",
+                        gap: 0.5,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <Chip
+                        size="small"
+                        label={g.status || "-"}
+                        color={statusChipColor(g.status) as any}
+                        variant={selected ? "filled" : "outlined"}
+                        sx={{ height: 22 }}
+                      />
+                      <Chip
+                        size="small"
+                        label={g.priority || "-"}
+                        color={priorityChipColor(g.priority) as any}
+                        variant={selected ? "filled" : "outlined"}
+                        sx={{ height: 22 }}
+                      />
+                    </Box>
+                  </Box>
+                </ListItemButton>
+              </ListItem>
             );
           })}
-          {groups.length === 0 && (
-            <div className="text-sm text-gray-500 p-2">
-              No tienes chats aún.
-            </div>
-          )}
-        </div>
-      </div>
-      {/* Chat */}
-      <div className="md:col-span-2 border rounded p-3 flex flex-col h-[70vh]">
-        <div className="flex items-center justify-between mb-2">
-          <div className="font-semibold">
-            Chat {active ? `#${active.id.slice(0, 8)}…` : ""}
-          </div>
-          {active && isAdminOrSolver && (
-            <div className="flex gap-2">
-              {["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"].map((status) => (
-                <Button
-                  key={status}
-                  type="button"
-                  onClick={() => setStatus(status)}
-                  className={
-                    (active.status?.toUpperCase() === status
-                      ? STATUS_TRANSLATIONS[status].cls +
-                        " border-2 border-black "
-                      : "bg-gray-200 text-gray-500 border border-gray-300 ") +
-                    " text-sm px-3 py-1 rounded"
-                  }
-                  title={STATUS_TRANSLATIONS[status].tooltip}
-                  disabled={active.status?.toUpperCase() === status}
-                >
-                  {STATUS_TRANSLATIONS[status].text}
-                </Button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex-1 overflow-y-auto space-y-2">
-          {msgs.map((m) => (
-            <div
-              key={m.id}
-              className={`border rounded p-2 ${
-                m.sender_user?.email === UserAPI.getUserInfoFromToken()?.email
-                  ? "bg-blue-100 text-right"
-                  : "bg-gray-100"
-              }`}
-            >
-              <div className="text-xs text-gray-600">
-                {new Date(m.created_at).toLocaleString()} ·{" "}
-                {m.sender_user?.email}
-              </div>
-              <div>{m.content}</div>
-            </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
+        </List>
+      </Paper>
 
-        <form onSubmit={send} className="mt-2 flex gap-2">
-          <Input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={
-              active
-                ? isClosed
-                  ? "Chat cerrado"
-                  : "Escribe un mensaje…"
-                : "Selecciona un chat…"
-            }
-            disabled={!active || isClosed || sending}
-          />
-          <Button type="submit" disabled={!active || isClosed || sending}>
-            {sending ? "Enviando..." : "Enviar"}
-          </Button>
-        </form>
-      </div>
-    </div>
+      {/* Panel de chat (scrollable) */}
+      <Paper
+        elevation={3}
+        sx={{
+          height: "100%",
+          borderRadius: 3,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <Box
+          sx={{
+            p: 2,
+            borderBottom: "1px solid",
+            borderColor: "divider",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 1,
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            {active && (
+              <Avatar src={active.pqr?.client_user?.avatar || undefined}>
+                {active.pqr?.client_user?.email?.[0]?.toUpperCase() || "U"}
+              </Avatar>
+            )}
+            <Box>
+              <Typography variant="h6" fontWeight={800}>
+                {active
+                  ? active.pqr?.title || `Chat #${active.id.slice(0, 8)}…`
+                  : "Selecciona un chat"}
+              </Typography>
+              {active && (
+                <Box sx={{ display: "flex", gap: 0.5, mt: 0.25 }}>
+                  <Chip
+                    size="small"
+                    label={active.priority || "-"}
+                    color={priorityChipColor(active.priority) as any}
+                    variant="outlined"
+                  />
+                </Box>
+              )}
+            </Box>
+          </Box>
+
+          {/* Selector de estado (sin color prop, estilizado via sx) */}
+          {active && isAdminOrSolver && (
+            <FormControl size="small" sx={{ minWidth: 220, ...statusBorderSx }}>
+              <InputLabel id="status-label">Estado</InputLabel>
+              <Select
+                labelId="status-label"
+                label="Estado"
+                value={(active.status || "OPEN").toUpperCase()}
+                onChange={async (e) => {
+                  const status = String(e.target.value).toUpperCase();
+                  if (active.status?.toUpperCase() === status) return;
+                  // @ts-ignore
+                  await (ChatAPI as any).setGroupStatus?.(active.id, status);
+                            setActive((a: any) => (a ? { ...a, status } : a));
+                  setGroups((gs) =>
+                    gs.map((g) => (g.id === active.id ? { ...g, status } : g))
+                  );
+                }}
+              >
+                {STATUSES.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s === "OPEN"
+                      ? "Abierta"
+                      : s === "IN_PROGRESS"
+                      ? "En progreso"
+                      : s === "RESOLVED"
+                      ? "Resuelta"
+                      : "Cerrada"}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+        </Box>
+
+        {/* Mensajes (scroll) */}
+        <Box
+          sx={{
+            flex: 1,
+            overflowY: "auto",
+            p: 2,
+            scrollBehavior: "smooth",
+          }}
+        >
+          {loadingMsgs && (
+            <Box sx={{ mb: 2 }}>
+              <Skeleton variant="rounded" height={48} sx={{ mb: 1 }} />
+              <Skeleton variant="rounded" height={48} sx={{ mb: 1 }} />
+              <Skeleton variant="rounded" height={48} sx={{ mb: 1 }} />
+            </Box>
+          )}
+          {msgs.map((m) => {
+            const mine = m.sender_user?.email === me?.email;
+            return (
+              <Box
+                key={m.id}
+                sx={{
+                  display: "flex",
+                  justifyContent: mine ? "flex-end" : "flex-start",
+                  mb: 1.5,
+                }}
+              >
+                <Box
+                  sx={{
+                    maxWidth: "75%",
+                    bgcolor: mine ? "primary.50" : "grey.100",
+                    border: "1px solid",
+                    borderColor: mine ? "primary.100" : "grey.200",
+                    px: 1.5,
+                    py: 1,
+                    borderRadius: 2,
+                  }}
+                >
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mb: 0.25 }}
+                  >
+                    {new Date(m.created_at).toLocaleString()} ·{" "}
+                    {m.sender_user?.email}
+                  </Typography>
+                  <Typography sx={{ whiteSpace: "pre-wrap" }}>
+                    {m.content}
+                  </Typography>
+                </Box>
+              </Box>
+            );
+          })}
+          <div ref={bottomRef} />
+        </Box>
+
+        <Divider />
+
+        {/* Composer (Enter envía) */}
+        {canWrite ? (
+          <Box
+            component="form"
+            onSubmit={send}
+            sx={{
+              p: 1.25,
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              bgcolor: "background.paper",
+            }}
+          >
+            <TextField
+              fullWidth
+              autoFocus
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Escribe un mensaje…"
+              disabled={sending}
+              onKeyDown={async (e) => {
+                // Para IME (teclados chinos/japoneses) no interceptar
+                // @ts-ignore
+                if (e.isComposing) return;
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!sending && text.trim()) {
+                    await send();
+                  }
+                }
+              }}
+              inputProps={{ "aria-label": "Escribir mensaje" }}
+            />
+            <IconButton
+              type="submit"
+              color="primary"
+              disabled={sending || !text.trim()}
+              sx={{
+                bgcolor: "primary.main",
+                color: "primary.contrastText",
+                "&:hover": { bgcolor: "primary.dark" },
+              }}
+            >
+              <SendRounded />
+            </IconButton>
+          </Box>
+        ) : (
+          <Box sx={{ p: 1.5, textAlign: "center" }}>
+            <Chip
+              label={
+                !active
+                  ? "Selecciona un chat para comenzar"
+                  : "Chat cerrado: no se pueden enviar mensajes"
+              }
+              color={active ? "default" : "info"}
+              variant="outlined"
+            />
+          </Box>
+        )}
+      </Paper>
+    </Box>
   );
 }

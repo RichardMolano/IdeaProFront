@@ -1,6 +1,4 @@
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  "https://dental-helena-your-horizon.trycloudflare.com";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000"; // Cambia esto según tu configuración
 
 // Define or import the User type
 type User = {
