@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../store/auth";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import Grid from '@mui/material/Grid';
+import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -319,10 +319,10 @@ export default function DashboardHome() {
               )}
             </CardContent>
           </Card>
-  </Box>
+        </Box>
 
-  {/* Gráfico de pastel */}
-  <Box sx={{ gridColumn: { xs: "1 / -1", md: "span 7" } }}>
+        {/* Gráfico de pastel */}
+        <Box sx={{ gridColumn: { xs: "1 / -1", md: "span 7" } }}>
           <Card
             elevation={6}
             sx={{

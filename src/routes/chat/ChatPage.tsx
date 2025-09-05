@@ -393,7 +393,7 @@ export default function ChatPage() {
                   if (active.status?.toUpperCase() === status) return;
                   // @ts-ignore
                   await (ChatAPI as any).setGroupStatus?.(active.id, status);
-                            setActive((a: any) => (a ? { ...a, status } : a));
+                  setActive((a) => (a ? { ...a, status } : a));
                   setGroups((gs) =>
                     gs.map((g) => (g.id === active.id ? { ...g, status } : g))
                   );
@@ -412,6 +412,24 @@ export default function ChatPage() {
                 ))}
               </Select>
             </FormControl>
+          )}
+          <Box sx={{ flexGrow: 1 }} />
+          {active && (
+            <Typography variant="body2" color="text.secondary">
+              {(() => {
+                const createdAt = new Date(active.pqr?.created_at).getTime();
+                const daysSinceCreation = Math.floor(
+                  (Date.now() - createdAt) / (1000 * 60 * 60 * 24)
+                );
+                if (daysSinceCreation > 15) {
+                  return `Vencida hace ${daysSinceCreation - 15} días`;
+                } else {
+                  return `Creada hace ${daysSinceCreation} días · Quedan ${
+                    15 - daysSinceCreation
+                  } días`;
+                }
+              })()}
+            </Typography>
           )}
         </Box>
 
