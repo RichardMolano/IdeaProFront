@@ -192,7 +192,7 @@ export default function ChatPage() {
     if (!canWrite || !text.trim()) return;
     setSending(true);
     try {
-      await ChatAPI.send(active!.id, text.trim());
+      await ChatAPI.send(me?.id, active!.id, text.trim());
       setText("");
       // El efecto de autoscroll se dispara al cambiar msgs
     } finally {
@@ -450,7 +450,8 @@ export default function ChatPage() {
             </Box>
           )}
           {msgs.map((m) => {
-            const mine = m.sender_user?.email === me?.email;
+            const senderEmail = m.sender_email || m.sender_user?.email;
+            const mine = senderEmail === me?.email;
             return (
               <Box
                 key={m.id}
@@ -476,8 +477,7 @@ export default function ChatPage() {
                     color="text.secondary"
                     sx={{ display: "block", mb: 0.25 }}
                   >
-                    {new Date(m.created_at).toLocaleString()} ·{" "}
-                    {m.sender_user?.email}
+                    {new Date(m.created_at).toLocaleString()} · {senderEmail}
                   </Typography>
                   <Typography sx={{ whiteSpace: "pre-wrap" }}>
                     {m.content}

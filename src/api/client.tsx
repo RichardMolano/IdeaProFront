@@ -1,4 +1,52 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000"; // Cambia esto según tu configuración
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+// Modelo de Dependence
+export type Dependence = {
+  id: string;
+  name: string;
+  users?: Array<{ id: string; name: string; email: string }>;
+  pqrs?: Array<any>;
+};
+
+// DTOs para crear/actualizar
+export type CreateDependenceDto = {
+  name: string;
+};
+export type UpdateDependenceDto = {
+  name?: string;
+};
+
+export const DependenceAPI = {
+  // Listar todas las dependencias
+  list: async (): Promise<Dependence[]> => {
+    return api("/dependence", { method: "GET" });
+  },
+  // Obtener una dependencia por ID
+  get: async (id: string): Promise<Dependence> => {
+    return api(`/dependence/${encodeURIComponent(id)}`, {
+      method: "GET",
+    });
+  },
+  // Crear dependencia
+  create: async (dto: CreateDependenceDto): Promise<Dependence> => {
+    return api("/dependence", {
+      method: "POST",
+      body: JSON.stringify(dto),
+      headers: { "Content-Type": "application/json" },
+    });
+  },
+  // Actualizar dependencia
+  update: async (id: string, dto: UpdateDependenceDto): Promise<Dependence> => {
+    return api(`/dependence/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(dto),
+      headers: { "Content-Type": "application/json" },
+    });
+  },
+  // Eliminar dependencia
+  delete: async (id: string): Promise<void> => {
+    await api(`/dependence/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+};
 
 // Define or import the User type
 type User = {
@@ -57,14 +105,21 @@ export const ChatAPI = {
   messages: (groupId: string) =>
     api(`/chat/messages?groupId=${encodeURIComponent(groupId)}`),
   send: (
-    chat_group_id: string,
+    userId: string,
+    groupId: string,
     content: string,
     file_url?: string,
     file_type?: string
   ) =>
     api("/chat/message", {
       method: "POST",
-      body: JSON.stringify({ chat_group_id, content, file_url, file_type }),
+      body: JSON.stringify({
+        userId,
+        groupId,
+        content,
+        file_url,
+        file_type,
+      }),
     }),
   setGroupStatus: (
     chat_group_id: string,
@@ -109,11 +164,16 @@ export const AdminAPI = {
   },
 
   // POST /users
-  createUser: (email: string, password: string, role: string) =>
+  createUser: (
+    email: string,
+    password: string,
+    role: string,
+    dependenceId?: string
+  ) =>
     api("/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, role }),
+      body: JSON.stringify({ email, password, role, dependenceId }),
     }),
 
   // PUT /users/:id
@@ -121,12 +181,13 @@ export const AdminAPI = {
     userId: string,
     email?: string,
     role?: string,
-    password?: string
+    password?: string,
+    dependenceId?: string
   ) =>
     api(`/users/${encodeURIComponent(userId)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, role, password }),
+      body: JSON.stringify({ email, role, password, dependenceId }),
     }),
 
   // DELETE /users/:id
@@ -147,6 +208,7 @@ export const UserAPI = {
       return {
         email: payload.email,
         role: payload.role,
+        id: payload.sub,
       };
     } catch (error) {
       throw new Error("Invalid token");

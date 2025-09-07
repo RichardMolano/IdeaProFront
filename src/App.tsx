@@ -12,6 +12,7 @@ import Login from "./routes/auth/Login";
 import Register from "./routes/auth/Register";
 import ChatPage from "./routes/chat/ChatPage";
 import UserAdmin from "./routes/userAdmin/UserAdmin";
+import DependenceAdminPage from "./routes/dependence/DependenceAdminPage";
 
 import MyPqr from "./routes/pqr/MyPqr";
 import NewPqr from "./routes/pqr/NewPqr";
@@ -148,6 +149,13 @@ function Nav() {
           label: "Usuarios",
           icon: <AdminPanelSettingsIcon />,
           to: "/admin/user",
+          visible:
+            !!token && (user?.role === "Admin" || user?.role === "Supervisor"),
+        },
+        {
+          label: "Dependencias",
+          icon: <AssignmentIcon />,
+          to: "/admin/dependence",
           visible:
             !!token && (user?.role === "Admin" || user?.role === "Supervisor"),
         },
@@ -350,6 +358,14 @@ export default function App() {
                 element={
                   <ProtectedRole allowed={["Admin", "Supervisor"]}>
                     <UserAdmin />
+                  </ProtectedRole>
+                }
+              />
+              <Route
+                path="/admin/dependence"
+                element={
+                  <ProtectedRole allowed={["Admin", "Supervisor"]}>
+                    <DependenceAdminPage />
                   </ProtectedRole>
                 }
               />

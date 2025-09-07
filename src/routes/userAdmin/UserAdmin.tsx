@@ -1,7 +1,8 @@
 // src/routes/userAdmin/UserAdmin.tsx
 import { useEffect, useMemo, useState } from "react";
-import { AdminAPI } from "../../api/client";
+import { AdminAPI, DependenceAPI, Dependence } from "../../api/client";
 import { Button, Select, Input } from "../../ui/Form";
+import { Tooltip } from "@mui/material";
 
 type AdminUser = {
   id: string;
@@ -15,6 +16,8 @@ type AdminUser = {
 };
 
 export default function UserAdminPage() {
+  const [dependences, setDependences] = useState<Dependence[]>([]);
+  const [newDependenceId, setNewDependenceId] = useState<string>("");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
@@ -30,7 +33,10 @@ export default function UserAdminPage() {
 
   // buffers edición
   const [editBuffer, setEditBuffer] = useState<
-    Record<string, { email: string; role: string; password?: string }>
+    Record<
+      string,
+      { email: string; role: string; password?: string; dependenceId?: string }
+    >
   >({});
 
   useEffect(() => {
@@ -38,11 +44,14 @@ export default function UserAdminPage() {
     (async () => {
       setLoading(true);
       try {
-        const data = await AdminAPI.users();
+        const [userData, depData] = await Promise.all([
+          AdminAPI.users(),
+          DependenceAPI.list(),
+        ]);
         if (!mounted) return;
-        setUsers(data || []);
-        // set rol por defecto si hay alguno
-        if (!newRole && data?.length) setNewRole(data[0].role || "");
+        setUsers(userData || []);
+        setDependences(depData || []);
+        if (!newRole && userData?.length) setNewRole(userData[0].role || "");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -82,10 +91,12 @@ export default function UserAdminPage() {
     setMsg(null);
     setLoading(true);
     try {
-      await AdminAPI.createUser(newEmail, newPass, newRole);
+      const dependenceId = newRole === "Solver" ? newDependenceId : undefined;
+      await AdminAPI.createUser(newEmail, newPass, newRole, dependenceId);
       setMsg(`Usuario ${newEmail} creado.`);
       setNewEmail("");
       setNewPass("");
+      setNewDependenceId("");
       await refresh();
     } finally {
       setLoading(false);
@@ -96,7 +107,12 @@ export default function UserAdminPage() {
     setEditing((prev) => ({ ...prev, [u.id]: true }));
     setEditBuffer((prev) => ({
       ...prev,
-      [u.id]: { email: u.email, role: u.role, password: "" },
+      [u.id]: {
+        email: u.email,
+        role: u.role,
+        password: "",
+        dependenceId: u.dependence?.id ?? "",
+      },
     }));
   }
 
@@ -111,9 +127,18 @@ export default function UserAdminPage() {
       email: string;
       role: string;
       password?: string;
+      dependenceId?: string;
     }>
   ) {
-    setEditBuffer((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+    setEditBuffer((prev) => {
+      const prevBuf = prev[id] || {};
+      // Si el rol cambia y ya no es Solver, borra la dependencia
+      if (patch.role && patch.role !== "Solver") {
+        const { dependenceId, ...rest } = { ...prevBuf, ...patch };
+        return { ...prev, [id]: { ...rest, dependenceId: "" } };
+      }
+      return { ...prev, [id]: { ...prevBuf, ...patch } };
+    });
   }
 
   async function saveEdit(u: AdminUser) {
@@ -122,13 +147,12 @@ export default function UserAdminPage() {
     setBusyRow((b) => ({ ...b, [u.id]: true }));
     setMsg(null);
     try {
-      // Si el campo no se modificó, usa el valor anterior
       const email = buf.email || u.email;
       const role = buf.role || u.role;
-      // Solo envía la contraseña si se escribió una nueva
       const password =
         buf.password && buf.password.length > 0 ? buf.password : undefined;
-      await AdminAPI.updateUser(u.id, email, role, password);
+      const dependenceId = role === "Solver" ? buf.dependenceId : undefined;
+      await AdminAPI.updateUser(u.id, email, role, password, dependenceId);
       setMsg(`Usuario ${u.email} actualizado.`);
       setEditing((e) => ({ ...e, [u.id]: false }));
       await refresh();
@@ -214,6 +238,20 @@ export default function UserAdminPage() {
               </option>
             ))}
           </Select>
+          {newRole === "Solver" && (
+            <Select
+              value={newDependenceId}
+              onChange={(e: any) => setNewDependenceId(e.target.value)}
+              className="rounded-xl border-slate-200 focus:border-amber-400 focus:ring-amber-300/40"
+            >
+              <option value="">Seleccione dependencia</option>
+              {dependences.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </Select>
+          )}
         </div>
         <div className="mt-3">
           <Button
@@ -262,10 +300,27 @@ export default function UserAdminPage() {
                       )}
                     </h3>
                     {u.role === "Solver" && (
-                      <div className="mt-2 text-sm text-amber-700 bg-amber-100/60 rounded-md p-2 ring-1 ring-amber-200">
-                        <strong>Aviso:</strong> Los usuarios con rol "Solver"
-                        solo pueden gestionar PQRs asignados a su dependencia.
-                      </div>
+                      <Tooltip
+                        title={
+                          u.dependence?.name
+                            ? `Dependencia: ${u.dependence.name}`
+                            : "Sin dependencia asignada"
+                        }
+                        placement="right"
+                        arrow
+                      >
+                        <div className="mt-2 text-sm text-amber-700 bg-amber-100/60 rounded-md p-2 ring-1 ring-amber-200 cursor-pointer">
+                          <strong>Solver</strong>
+                          {u.dependence?.name && (
+                            <span className="ml-2 font-semibold text-amber-900">
+                              ({u.dependence.name})
+                            </span>
+                          )}
+                          <span className="block text-xs text-amber-800 mt-1">
+                            Solo puede gestionar PQRs de su dependencia.
+                          </span>
+                        </div>
+                      </Tooltip>
                     )}
 
                     <div className="mt-1 text-sm text-slate-700">
@@ -297,19 +352,39 @@ export default function UserAdminPage() {
 
                   <div className="flex items-center gap-2">
                     {isEditing ? (
-                      <Select
-                        value={buf?.role ?? u.role}
-                        onChange={(e: any) =>
-                          onChangeEdit(u.id, { role: e.target.value })
-                        }
-                        className="rounded-xl border-slate-200 focus:border-amber-400 focus:ring-amber-300/40"
-                      >
-                        {roleOptions.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </Select>
+                      <>
+                        <Select
+                          value={buf?.role ?? u.role}
+                          onChange={(e: any) =>
+                            onChangeEdit(u.id, { role: e.target.value })
+                          }
+                          className="rounded-xl border-slate-200 focus:border-amber-400 focus:ring-amber-300/40"
+                        >
+                          {roleOptions.map((r) => (
+                            <option key={r} value={r}>
+                              {r}
+                            </option>
+                          ))}
+                        </Select>
+                        {buf?.role === "Solver" && (
+                          <Select
+                            value={buf?.dependenceId ?? ""}
+                            onChange={(e: any) =>
+                              onChangeEdit(u.id, {
+                                dependenceId: e.target.value,
+                              })
+                            }
+                            className="rounded-xl border-slate-200 focus:border-amber-400 focus:ring-amber-300/40"
+                          >
+                            <option value="">Seleccione dependencia</option>
+                            {dependences.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.name}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
+                      </>
                     ) : (
                       <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-800 ring-1 ring-slate-200">
                         {u.role || "-"}
