@@ -39,7 +39,9 @@ export default function NewPqr() {
           <option value="MEDIUM">Media</option>
           <option value="HIGH">Alta</option>
         </Select>
-        <Button type="submit">Crear</Button>
+        <Button type="submit" className="text-white">
+          Crear
+        </Button>
         {msg && <div className="text-green-700 text-sm">{msg}</div>}
       </form>
     </div>

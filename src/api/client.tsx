@@ -92,6 +92,50 @@ export const AssignAPI = {
     ),
 };
 
+// src/api/client.ts (o donde tengas el AdminAPI)
+export const AdminAPI = {
+  // GET /users  -> normaliza role a string
+  users: async () => {
+    const rows = await api("/users");
+    return (rows || []).map((u: any) => ({
+      id: u.id,
+      email: u.email ?? "",
+      role: u.role ?? "", // <- lo que tu UI espera (string)
+      roleId: u.role?.id ?? null, // opcional por si luego quieres usar IDs
+      dependence: u.dependence ?? null,
+      createdAt: u.createdAt,
+      updatedAt: u.updatedAt,
+    }));
+  },
+
+  // POST /users
+  createUser: (email: string, password: string, role: string) =>
+    api("/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, role }),
+    }),
+
+  // PUT /users/:id
+  updateUser: (
+    userId: string,
+    email?: string,
+    role?: string,
+    password?: string
+  ) =>
+    api(`/users/${encodeURIComponent(userId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, role, password }),
+    }),
+
+  // DELETE /users/:id
+  deleteUser: (userId: string) =>
+    api(`/users/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    }),
+};
+
 // user info
 export const UserAPI = {
   getUserInfoFromToken: () => {
