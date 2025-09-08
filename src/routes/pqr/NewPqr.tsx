@@ -1,21 +1,34 @@
 import { PqrAPI } from "../../api/client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { DependenceAPI } from "../../api/client";
 import { Button, Input, Select, Textarea } from "../../ui/Form";
 
 export default function NewPqr() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH">("MEDIUM");
+  const [dependenceId, setDependenceId] = useState<string>("");
+  const [dependences, setDependences] = useState<any[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
+
+  // Cargar dependencias al montar
+  useEffect(() => {
+    DependenceAPI.list().then(setDependences);
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
-    await PqrAPI.create(title, description, priority);
+    if (!dependenceId) {
+      setMsg("Debes seleccionar una dependencia.");
+      return;
+    }
+    await PqrAPI.create(title, description, priority, dependenceId);
     setMsg("PQR creado. Se generó el chat.");
     setTitle("");
     setDescription("");
     setPriority("MEDIUM");
+    setDependenceId("");
   }
   return (
     <div className="max-w-lg mx-auto">
@@ -38,6 +51,18 @@ export default function NewPqr() {
           <option value="LOW">Baja</option>
           <option value="MEDIUM">Media</option>
           <option value="HIGH">Alta</option>
+        </Select>
+        <Select
+          value={dependenceId}
+          onChange={(e) => setDependenceId(e.target.value)}
+          required
+        >
+          <option value="">Selecciona una dependencia</option>
+          {dependences.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
         </Select>
         <Button type="submit" className="text-white">
           Crear

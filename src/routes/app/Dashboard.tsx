@@ -1,3 +1,10 @@
+import MyPqr from "../../routes/pqr/MyPqr";
+
 export default function Dashboard() {
-  return <div>Dashboard</div>
+  return (
+    <div>
+      Dashboard
+      <MyPqr />
+    </div>
+  );
 }

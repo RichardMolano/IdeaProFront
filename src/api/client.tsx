@@ -89,11 +89,12 @@ export const PqrAPI = {
   create: (
     title: string,
     description: string,
-    priority: "LOW" | "MEDIUM" | "HIGH" = "MEDIUM"
+    priority: "LOW" | "MEDIUM" | "HIGH" = "MEDIUM",
+    dependence: string
   ) =>
     api("/pqr", {
       method: "POST",
-      body: JSON.stringify({ title, description, priority }),
+      body: JSON.stringify({ title, description, priority, dependence }),
     }),
   mine: () => api("/pqr/mine"),
 };
@@ -213,5 +214,28 @@ export const UserAPI = {
     } catch (error) {
       throw new Error("Invalid token");
     }
+  },
+};
+
+// imagenes http://localhost:3001
+export const ImageAPI = {
+  upload: async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(`http://localhost:3001/upload`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    return await response.text(); // Returns the uploaded image URL
+  },
+
+  getRawImageUrl: (fileName: string): string => {
+    return `${fileName}`;
   },
 };

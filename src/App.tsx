@@ -132,12 +132,7 @@ function Nav() {
           to: "/pqr/new",
           visible: !!token,
         },
-        {
-          label: "Mis PQR",
-          icon: <AssignmentIcon />,
-          to: "/pqr/mine",
-          visible: !!token,
-        },
+
         {
           label: "Asignaciones",
           icon: <AdminPanelSettingsIcon />,
@@ -232,15 +227,14 @@ function Nav() {
               inset: 0,
               borderRadius: 999,
               background: "linear-gradient(135deg, #FFD700 0%, #FFF176 100%)",
-              boxShadow: "0 6px 18px rgba(0,0,0,.25)",
               zIndex: -1,
             },
             "& .MuiBottomNavigationAction-root.Mui-selected .MuiBottomNavigationAction-label":
               {
-                color: "#fff !important",
+                color: "#30008A !important",
               },
             "& .MuiBottomNavigationAction-root.Mui-selected .MuiSvgIcon-root": {
-              color: "#fff !important",
+              color: "#30008A !important",
             },
           }}
         >

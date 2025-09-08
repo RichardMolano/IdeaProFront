@@ -282,7 +282,7 @@ export default function AssignPage() {
                     <Button
                       onClick={() => assign(g.id)}
                       disabled={!selectedSolverByGroup[g.id] || !!busy[g.id]}
-                      className="rounded-xl px-4 py-2 font-semibold text-white shadow-md hover:shadow-lg transition-shadow
+                      className="rounded-xl px-4 py-2 font-semibold text-black shadow-md hover:shadow-lg transition-shadow
                                bg-[linear-gradient(135deg,#FFD700_0%,#FFF176_100%)]"
                     >
                       {busy[g.id] ? "Asignando…" : "Asignar"}

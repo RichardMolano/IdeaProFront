@@ -19,3 +19,8 @@
   margin-bottom: 4px;
   align-self: flex-end; /* Opcional, para alinear a la derecha */
 }
+/* Quita cualquier borde en los sectores del pie */
+.recharts-sector,
+.recharts-pie-sector {
+  stroke: none !important;
+}

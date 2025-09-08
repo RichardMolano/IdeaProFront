@@ -27,6 +27,7 @@ import {
   Legend,
   Tooltip as ReTooltip,
 } from "recharts";
+import MyPqr from "../../routes/pqr/MyPqr";
 
 type StatState = {
   totalChats: number;
@@ -215,7 +216,7 @@ export default function DashboardHome() {
   );
 
   // Paleta dorada (claro → oscuro)
-  const PIE_COLORS = ["#FFF59D", "#FFE066", "#FFC300", "#B8860B"];
+  const PIE_COLORS = ["#e4871cff", "#6954e2ff", "#00be7fff", "#b80202ff"];
 
   const total = chartData.reduce((acc, d) => acc + d.value, 0);
   const hasData = total > 0;
@@ -230,14 +231,24 @@ export default function DashboardHome() {
 
   if (!token || !(user?.role === "Admin" || user?.role === "Solver")) {
     return (
-      <Box sx={{ mt: 10, textAlign: "center" }}>
-        <Typography variant="h4" fontWeight="bold" gutterBottom>
-          Bienvenido al sistema PQRSD
-        </Typography>
-        <Typography color="text.secondary" sx={{ mt: 2 }}>
-          Inicia sesión para acceder a las funcionalidades.
-        </Typography>
-      </Box>
+      <>
+        <Box sx={{ mt: 10, textAlign: "center" }}>
+          <Typography variant="h4" fontWeight="bold" gutterBottom>
+            Bienvenido al sistema PQRSD
+          </Typography>
+          {!user && (
+            <Typography color="text.secondary" sx={{ mt: 2 }}>
+              Inicia sesión para acceder a las funcionalidades.
+            </Typography>
+          )}
+        </Box>
+        {!user && (
+          <Typography color="text.secondary" sx={{ mt: 2 }}>
+            Por favor, inicia sesión para continuar.
+          </Typography>
+        )}
+        {user && <MyPqr />}
+      </>
     );
   }
 
@@ -346,28 +357,40 @@ export default function DashboardHome() {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  bgcolor: "grey.100",
-                  borderRadius: 3,
-                  boxShadow: "0 4px 16px 0 rgba(31,38,135,0.12)",
+                  background: "transparent",
                 }}
               >
                 {hasData ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <ReTooltip />
-                      <Legend />
+                      <Legend
+                        verticalAlign="top"
+                        height={36}
+                        iconType="circle"
+                        formatter={(value) => (
+                          <span style={{ fontWeight: "bold" }}>{value}</span>
+                        )}
+                      />
+                      <ReTooltip
+                        formatter={(value: any, name: any) => [
+                          value,
+                          name as string,
+                        ]}
+                      />
+
                       <Pie
                         data={chartData}
                         dataKey="value"
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={95}
                         innerRadius={50}
+                        outerRadius={95}
                         paddingAngle={3}
                         labelLine={false}
+                        animationEasing="linear"
                         label={renderLabel}
-                        isAnimationActive={false}
+                        isAnimationActive={true}
                       >
                         {chartData.map((entry, idx) => (
                           <Cell
@@ -436,6 +459,8 @@ export default function DashboardHome() {
           </TableContainer>
         )}
       </Box>
+      <Box sx={{ height: 20 }} />
+      <MyPqr />
     </Box>
   );
 }

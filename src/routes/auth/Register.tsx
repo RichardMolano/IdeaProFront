@@ -37,7 +37,9 @@ export default function Register() {
           onChange={(e) => setPassword(e.target.value)}
         />
         {error && <div className="text-red-600 text-sm">{error}</div>}
-        <Button type="submit">Crear cuenta</Button>
+        <Button type="submit" className="text-white">
+          Crear cuenta
+        </Button>
       </form>
       <div className="mt-3 text-sm">
         ¿Ya tienes cuenta?{" "}

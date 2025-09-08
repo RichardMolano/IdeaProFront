@@ -17,12 +17,16 @@ import MenuItem from "@mui/material/MenuItem";
 import Skeleton from "@mui/material/Skeleton";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChatAPI, UserAPI } from "../../api/client";
+import { ChatAPI, ImageAPI, UserAPI } from "../../api/client";
 
 const STATUSES = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
 const LAYOUT_H = "72vh"; // altura fija para permitir scroll interno
 
 export default function ChatPage() {
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const [uploadedImgUrl, setUploadedImgUrl] = useState<string | null>(null);
   const me = UserAPI.getUserInfoFromToken();
   const isAdminOrSolver = me?.role === "Admin" || me?.role === "Solver";
   const isSmall = useMediaQuery("(max-width:900px)");
@@ -183,18 +187,32 @@ export default function ChatPage() {
   }, [active?.id]);
 
   // Autoscroll al último mensaje
+  // Autoscroll solo cuando se envía un mensaje
+  const [shouldScroll, setShouldScroll] = useState(false);
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs.length, loadingMsgs, active?.id]);
+    if (shouldScroll) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      setShouldScroll(false);
+    }
+  }, [msgs.length, shouldScroll]);
 
   async function send(e?: React.FormEvent) {
     e?.preventDefault?.();
-    if (!canWrite || !text.trim()) return;
+    if (!canWrite || (!text.trim() && !uploadedImgUrl)) return;
     setSending(true);
     try {
-      await ChatAPI.send(me?.id, active!.id, text.trim());
+      await ChatAPI.send(
+        me?.id,
+        active!.id,
+        text.trim(),
+        uploadedImgUrl || undefined,
+        uploadedImgUrl ? "image" : undefined
+      );
       setText("");
-      // El efecto de autoscroll se dispara al cambiar msgs
+      setUploadedImgUrl(null);
+      setImageFile(null);
+      setImagePreview(null);
+      setShouldScroll(true);
     } finally {
       setSending(false);
     }
@@ -293,6 +311,13 @@ export default function ChatPage() {
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <Typography noWrap fontWeight={700}>
                       {g.pqr?.client_user?.email || "Usuario"}
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      noWrap
+                      color={selected ? "inherit" : "text.secondary"}
+                    >
+                      {g.pqr.dependence?.name || "Sin dependencia"}
                     </Typography>
                     <Typography
                       variant="body2"
@@ -479,9 +504,52 @@ export default function ChatPage() {
                   >
                     {new Date(m.created_at).toLocaleString()} · {senderEmail}
                   </Typography>
-                  <Typography sx={{ whiteSpace: "pre-wrap" }}>
-                    {m.content}
-                  </Typography>
+                  {m.content && (
+                    <Typography
+                      sx={{ whiteSpace: "pre-wrap", mb: m.file_url ? 1 : 0 }}
+                    >
+                      {m.content}
+                    </Typography>
+                  )}
+                  {m.file_url &&
+                    (m.file_url.match(/\.(png|jpe?g|gif|bmp|webp)$/i) ? (
+                      <img
+                        src={m.file_url}
+                        alt="Archivo adjunto"
+                        style={{
+                          maxWidth: "100%",
+                          maxHeight: "200px",
+                          borderRadius: "15px",
+                          cursor: "pointer",
+                          marginTop: 4,
+                        }}
+                        onClick={() => window.open(m.file_url, "_blank")}
+                      />
+                    ) : (
+                      <Box
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 0.5,
+                          cursor: "pointer",
+                          color: "white",
+                          backgroundColor: "#1b86ff",
+                          padding: "4px 8px",
+                          borderRadius: "4px",
+                          marginTop: 4,
+                        }}
+                        onClick={() => window.open(m.file_url, "_blank")}
+                      >
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: "white",
+                          }}
+                        >
+                          Archivo adjunto
+                        </Typography>
+                      </Box>
+                    ))}
                 </Box>
               </Box>
             );
@@ -502,6 +570,7 @@ export default function ChatPage() {
               alignItems: "center",
               gap: 1,
               bgcolor: "background.paper",
+              flexWrap: "wrap",
             }}
           >
             <TextField
@@ -517,17 +586,64 @@ export default function ChatPage() {
                 if (e.isComposing) return;
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  if (!sending && text.trim()) {
+                  if (!sending && (text.trim() || uploadedImgUrl)) {
                     await send();
                   }
                 }
               }}
               inputProps={{ "aria-label": "Escribir mensaje" }}
             />
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              id="chat-img-upload"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setImageFile(file);
+                setImagePreview(URL.createObjectURL(file));
+                setUploadingImg(true);
+                try {
+                  const imgName = await ImageAPI.upload(file);
+
+                  if (!imgName) {
+                    throw new Error("No se recibió el nombre de la imagen");
+                  }
+
+                  const url = await ImageAPI.getRawImageUrl(imgName);
+                  setUploadedImgUrl(url);
+                } catch (err) {
+                  console.error("Error al subir imagen:", err);
+                  alert(
+                    "Error al subir imagen. Por favor, inténtalo de nuevo."
+                  );
+                  setUploadedImgUrl(null);
+                } finally {
+                  setUploadingImg(false);
+                }
+              }}
+            />
+            <label htmlFor="chat-img-upload">
+              <IconButton
+                component="span"
+                color={uploadingImg ? "secondary" : "primary"}
+                disabled={uploadingImg || sending}
+                sx={{
+                  bgcolor: uploadingImg ? "grey.300" : "primary.main",
+                  color: "primary.contrastText",
+                  "&:hover": { bgcolor: "primary.dark" },
+                }}
+              >
+                <span role="img" aria-label="subir imagen">
+                  📄
+                </span>
+              </IconButton>
+            </label>
             <IconButton
               type="submit"
               color="primary"
-              disabled={sending || !text.trim()}
+              disabled={sending || (!text.trim() && !uploadedImgUrl)}
               sx={{
                 bgcolor: "primary.main",
                 color: "primary.contrastText",
@@ -536,6 +652,50 @@ export default function ChatPage() {
             >
               <SendRounded />
             </IconButton>
+            {imagePreview && (
+              <Box sx={{ ml: 2, display: "flex", alignItems: "center" }}>
+                {imagePreview &&
+                imageFile?.type.match(/image\/(png|jpe?g|gif|bmp|webp)/i) ? (
+                  <img
+                    src={imagePreview}
+                    alt="preview"
+                    style={{
+                      maxHeight: 48,
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                    }}
+                  />
+                ) : (
+                  <span
+                    role="img"
+                    aria-label="archivo adjunto"
+                    style={{
+                      fontSize: 24,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 48,
+                      height: 48,
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      backgroundColor: "#f5f5f5",
+                    }}
+                  >
+                    📎
+                  </span>
+                )}
+                {uploadingImg && (
+                  <Typography sx={{ ml: 1 }} color="text.secondary">
+                    Subiendo…
+                  </Typography>
+                )}
+                {uploadedImgUrl && (
+                  <Typography sx={{ ml: 1, color: "green" }}>
+                    Lista para enviar
+                  </Typography>
+                )}
+              </Box>
+            )}
           </Box>
         ) : (
           <Box sx={{ p: 1.5, textAlign: "center" }}>

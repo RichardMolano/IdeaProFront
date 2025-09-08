@@ -37,7 +37,9 @@ export default function Login() {
           onChange={(e) => setPassword(e.target.value)}
         />
         {error && <div className="text-red-600 text-sm">{error}</div>}
-        <Button type="submit">Entrar</Button>
+        <Button type="submit" className="text-white">
+          Entrar
+        </Button>
       </form>
       <div className="mt-3 text-sm">
         ¿No tienes cuenta?{" "}
