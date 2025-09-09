@@ -13,6 +13,7 @@ type Group = {
     client_user?: { email?: string };
     status?: string;
     priority?: string;
+    dependence?: { name?: string };
   };
   assignments?: Array<{
     id: string;
@@ -20,7 +21,7 @@ type Group = {
     created_at?: string;
   }>;
 };
-type Solver = { id: string; email: string };
+type Solver = { id: string; email: string; dependence?: { name: string } };
 
 function StatusChip({ value }: { value?: string }) {
   const v = (value || "-").toUpperCase();
@@ -228,6 +229,18 @@ export default function AssignPage() {
                       {assignedSolverEmail}
                     </span>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">Dependencia:</span>
+                    <span
+                      className={`${
+                        g.pqr?.dependence?.name === "Sin asignar"
+                          ? "text-slate-500"
+                          : "text-slate-900"
+                      }`}
+                    >
+                      {g.pqr?.dependence?.name || "-"}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Detalle colapsable */}
@@ -271,10 +284,35 @@ export default function AssignPage() {
                     }
                   >
                     <option value="">Seleccione Solver/Admin</option>
-                    {solvers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.email}
-                      </option>
+                    {Array.from(
+                      new Set(
+                        solvers.map(
+                          (solver) =>
+                            solver.dependence?.name || "Sin Dependencia"
+                        )
+                      )
+                    ).map((dependenceName) => (
+                      <optgroup
+                        key={dependenceName}
+                        label={
+                          dependenceName === "Sin Dependencia"
+                            ? "Sin Dependencia"
+                            : `Dependencia: ${dependenceName}`
+                        }
+                      >
+                        {solvers
+                          .filter(
+                            (solver) =>
+                              solver.dependence?.name === dependenceName ||
+                              (!solver.dependence &&
+                                dependenceName === "Sin Dependencia")
+                          )
+                          .map((solver) => (
+                            <option key={solver.id} value={solver.id}>
+                              {solver.email}
+                            </option>
+                          ))}
+                      </optgroup>
                     ))}
                   </Select>
 

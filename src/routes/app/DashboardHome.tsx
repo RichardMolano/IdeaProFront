@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../store/auth";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -19,6 +18,10 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import PieChartIcon from "@mui/icons-material/PieChart";
+import Stack from "@mui/material/Stack";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+
 import {
   ResponsiveContainer,
   PieChart,
@@ -27,7 +30,15 @@ import {
   Legend,
   Tooltip as ReTooltip,
 } from "recharts";
+
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import dayjs, { Dayjs } from "dayjs";
+
 import MyPqr from "../../routes/pqr/MyPqr";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
 type StatState = {
   totalChats: number;
@@ -42,9 +53,25 @@ type SolverAgg = { email: string; tasks: number };
 // util seguro para números
 const toCount = (v: any) => Math.max(0, Number(v) || 0);
 
+// convierte a dayjs válido o null
+const toDay = (v: any): Dayjs | null => {
+  if (!v) return null;
+  const d = dayjs(v);
+  return d.isValid() ? d : null;
+};
+
 export default function DashboardHome() {
   const { user, token } = useAuth();
 
+  // Estado base: chats crudos y loading
+  const [rawChats, setRawChats] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Filtro de fechas
+  const [dateStart, setDateStart] = useState<Dayjs | null>(null);
+  const [dateEnd, setDateEnd] = useState<Dayjs | null>(null);
+
+  // Derivados: stats y solvers en base al filtro
   const [stats, setStats] = useState<StatState>({
     totalChats: 0,
     openChats: 0,
@@ -53,12 +80,64 @@ export default function DashboardHome() {
     closedChats: 0,
   });
   const [solvers, setSolvers] = useState<SolverAgg[]>([]);
-  const [loading, setLoading] = useState(true);
 
   // refs para controlar SSE/polling
   const sseRef = useRef<EventSource | null>(null);
   const pollRef = useRef<number | null>(null);
   const retryRef = useRef<number>(0);
+
+  // ---- FILTRADO POR FECHA (cliente) ----
+  const filteredChats = useMemo(() => {
+    if (!rawChats?.length) return [];
+    const start = dateStart ? dateStart.startOf("day") : null;
+    const end = dateEnd ? dateEnd.endOf("day") : null;
+
+    return rawChats.filter((c: any) => {
+      const ca = toDay(c?.pqr.created_at);
+      if (!ca) return false; // si no tiene fecha, lo excluimos
+      const gteStart = start ? ca.isSame(start) || ca.isAfter(start) : true;
+      const lteEnd = end ? ca.isSame(end) || ca.isBefore(end) : true;
+      return gteStart && lteEnd;
+    });
+  }, [rawChats, dateStart, dateEnd]);
+
+  // Recalcular estadísticas cuando cambia el filtro o llegan nuevos datos
+  useEffect(() => {
+    const chats = filteredChats;
+    const openChats = toCount(
+      chats.filter((c: any) => c?.status === "OPEN").length
+    );
+    const resolvedChats = toCount(
+      chats.filter((c: any) => c?.status === "RESOLVED").length
+    );
+    const inProgressChats = toCount(
+      chats.filter((c: any) => c?.status === "IN_PROGRESS").length
+    );
+    const closedChats = toCount(
+      chats.filter((c: any) => c?.status === "CLOSED").length
+    );
+
+    setStats({
+      totalChats: toCount(chats?.length),
+      openChats,
+      resolvedChats,
+      inProgressChats,
+      closedChats,
+    });
+
+    const solverMap: Record<string, number> = {};
+    chats?.forEach((g: any) => {
+      if (Array.isArray(g?.assignments)) {
+        g.assignments.forEach((a: any) => {
+          const email = a?.solver_user?.email;
+          if (email) solverMap[email] = (solverMap[email] || 0) + 1;
+        });
+      }
+    });
+    setSolvers(
+      Object.entries(solverMap).map(([email, tasks]) => ({ email, tasks }))
+    );
+  }, [filteredChats]);
 
   useEffect(() => {
     if (!token || !(user?.role === "Admin" || user?.role === "Solver")) return;
@@ -66,49 +145,15 @@ export default function DashboardHome() {
     let cancelled = false;
 
     const applyChats = (chats: any[]) => {
-      const openChats = toCount(
-        chats.filter((c) => c?.status === "OPEN").length
-      );
-      const resolvedChats = toCount(
-        chats.filter((c) => c?.status === "RESOLVED").length
-      );
-      const inProgressChats = toCount(
-        chats.filter((c) => c?.status === "IN_PROGRESS").length
-      );
-      const closedChats = toCount(
-        chats.filter((c) => c?.status === "CLOSED").length
-      );
-
-      setStats({
-        totalChats: toCount(chats?.length),
-        openChats,
-        resolvedChats,
-        inProgressChats,
-        closedChats,
-      });
-
-      const solverMap: Record<string, number> = {};
-      chats?.forEach((g: any) => {
-        if (Array.isArray(g?.assignments)) {
-          g.assignments.forEach((a: any) => {
-            const email = a?.solver_user?.email;
-            if (email) solverMap[email] = (solverMap[email] || 0) + 1;
-          });
-        }
-      });
-      setSolvers(
-        Object.entries(solverMap).map(([email, tasks]) => ({ email, tasks }))
-      );
+      setRawChats(chats || []);
       setLoading(false);
     };
 
     const startPolling = () => {
-      // Limpia SSE si estuviera
       if (sseRef.current) {
         sseRef.current.close();
         sseRef.current = null;
       }
-      // Evita duplicados
       if (pollRef.current) window.clearInterval(pollRef.current);
 
       const poll = async () => {
@@ -118,18 +163,15 @@ export default function DashboardHome() {
             : await ChatAPI.groups();
           if (!cancelled) applyChats(chats || []);
         } catch {
-          // no rompe UI
           if (!cancelled) setLoading(false);
         }
       };
 
-      // dispara ya y luego cada 6s
       poll();
       pollRef.current = window.setInterval(poll, 6000);
     };
 
     const startSSE = () => {
-      // si no existe EventSource (SSR o navegador raro), usar polling
       if (
         typeof window === "undefined" ||
         typeof window.EventSource === "undefined"
@@ -139,12 +181,10 @@ export default function DashboardHome() {
       }
 
       try {
-        // evita múltiples conexiones
         if (sseRef.current) sseRef.current.close();
-
         setLoading(true);
         sseRef.current = new window.EventSource("/api/dashboard/stream", {
-          withCredentials: false, // CORS: asegúrate de habilitar en backend si es cross-origin
+          withCredentials: false,
         });
 
         sseRef.current.onmessage = (event) => {
@@ -152,29 +192,25 @@ export default function DashboardHome() {
             const payload = JSON.parse(event.data);
             const chats = payload?.chats || [];
             if (!cancelled) applyChats(chats);
-            // reset de reintentos en mensaje ok
             retryRef.current = 0;
           } catch {
-            // fallback si paquete inválido
+            // paquete inválido: ignorar
           }
         };
 
         sseRef.current.onerror = () => {
-          // Cierra y reintenta con backoff, luego cae a polling si insiste
           if (sseRef.current) {
             sseRef.current.close();
             sseRef.current = null;
           }
           const attempt = Math.min(retryRef.current + 1, 5);
           retryRef.current = attempt;
-          const delay = attempt * 1500; // 1.5s, 3s, 4.5s, ...
+          const delay = attempt * 1500;
 
-          // Pequeño timeout para no dejar spinner infinito
           setTimeout(() => {
             if (!cancelled) setLoading(false);
           }, 1200);
 
-          // Después del 3er intento, usa polling estable
           if (attempt >= 3) {
             startPolling();
           } else {
@@ -184,7 +220,6 @@ export default function DashboardHome() {
           }
         };
       } catch {
-        // si falla crear SSE, cae a polling
         startPolling();
       }
     };
@@ -204,7 +239,8 @@ export default function DashboardHome() {
       }
     };
   }, [token, user]);
-  // Datos del pastel (declarados antes del return para no romper el orden de hooks)
+
+  // Datos del pastel
   const chartData = useMemo(
     () => [
       { name: "Abiertos", value: toCount(stats.openChats) },
@@ -215,9 +251,7 @@ export default function DashboardHome() {
     [stats]
   );
 
-  // Paleta dorada (claro → oscuro)
   const PIE_COLORS = ["#e4871cff", "#6954e2ff", "#00be7fff", "#b80202ff"];
-
   const total = chartData.reduce((acc, d) => acc + d.value, 0);
   const hasData = total > 0;
 
@@ -227,6 +261,47 @@ export default function DashboardHome() {
     const pct = (d.value / total) * 100;
     if (pct < 3) return undefined;
     return `${d.name}: ${Math.round(pct)}%`;
+    // TIP: si quieres ocultar el borde exterior del pastel por completo,
+    // puedes envolver el <PieChart> en un contenedor con fondo igual al del card
+    // y no usar stroke en <Pie>.
+  };
+
+  // Presets de rango
+  const applyPreset = (type: "today" | "7d" | "month" | "all") => {
+    const now = dayjs();
+    if (type === "today") {
+      setDateStart(now.startOf("day"));
+      setDateEnd(now.endOf("day"));
+    } else if (type === "7d") {
+      setDateStart(now.subtract(6, "day").startOf("day"));
+      setDateEnd(now.endOf("day"));
+    } else if (type === "month") {
+      setDateStart(now.startOf("month"));
+      setDateEnd(now.endOf("month"));
+    } else {
+      setDateStart(null);
+      setDateEnd(null);
+    }
+  };
+
+  // Descargar PDF del dashboard
+  const handleDownloadPDF = async () => {
+    const input = document.getElementById("dashboard-report");
+    if (!input) return;
+    const canvas = await html2canvas(input, { scale: 2 });
+    const imgData = canvas.toDataURL("image/png");
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "pt",
+      format: "a4",
+    });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgProps = pdf.getImageProperties(imgData);
+    const pdfWidth = pageWidth;
+    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+    pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+    pdf.save("reporte-dashboard.pdf");
   };
 
   if (!token || !(user?.role === "Admin" || user?.role === "Solver")) {
@@ -253,14 +328,90 @@ export default function DashboardHome() {
   }
 
   return (
-    <Box sx={{ mt: 2 }}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        Bienvenido a la plataforma PQRSD
-      </Typography>
+    <Box sx={{ mt: 2 }} id="dashboard-report">
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <Typography variant="h4" fontWeight="bold" gutterBottom>
+          Bienvenido a la plataforma PQRSD
+        </Typography>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleDownloadPDF}
+          sx={{ ml: 2 }}
+        >
+          Descargar PDF
+        </Button>
+      </Box>
       <Typography color="text.secondary" sx={{ mb: 3 }}>
         Aquí puedes gestionar tus solicitudes, ver el estado de tus chats y
         acceder a las funcionalidades según tu rol.
       </Typography>
+
+      {/* Barra de filtros */}
+      <LocalizationProvider dateAdapter={AdapterDayjs}>
+        <Paper
+          sx={{
+            p: 2,
+            mb: 3,
+            borderRadius: 3,
+            background: "rgba(255,255,255,0.4)",
+            boxShadow: "0 8px 32px 0 rgba(31,38,135,0.12)",
+            backdropFilter: "blur(6px)",
+            border: "1px solid rgba(255,255,255,0.18)",
+          }}
+          elevation={0}
+        >
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            <Stack
+              direction="row"
+              spacing={2}
+              alignItems="center"
+              sx={{ flexWrap: "wrap" }}
+            >
+              <DatePicker
+                label="Desde"
+                value={dateStart}
+                onChange={(newVal) => setDateStart(newVal)}
+                slotProps={{ textField: { size: "small" } }}
+              />
+              <DatePicker
+                label="Hasta"
+                value={dateEnd}
+                onChange={(newVal) => setDateEnd(newVal)}
+                slotProps={{ textField: { size: "small" } }}
+              />
+              <Button
+                onClick={() => {
+                  setDateStart(null);
+                  setDateEnd(null);
+                }}
+                variant="outlined"
+                size="small"
+              >
+                Limpiar
+              </Button>
+            </Stack>
+
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Chip label="Hoy" onClick={() => applyPreset("today")} />
+              <Chip label="Últimos 7 días" onClick={() => applyPreset("7d")} />
+              <Chip label="Este mes" onClick={() => applyPreset("month")} />
+              <Chip label="Todo" onClick={() => applyPreset("all")} />
+            </Stack>
+          </Stack>
+        </Paper>
+      </LocalizationProvider>
 
       <Box
         sx={{
@@ -459,6 +610,7 @@ export default function DashboardHome() {
           </TableContainer>
         )}
       </Box>
+
       <Box sx={{ height: 20 }} />
       <MyPqr />
     </Box>
